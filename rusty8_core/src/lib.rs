@@ -76,6 +76,50 @@ impl Rusty {
         self.ram[..FONTSET_SIZE].copy_from_slice(&FONTSET);
     }
 
+    //Fetch, decode, execute
+    pub fn tick(&mut self) {
+        //Fetch
+        let op_code = self.fetch();
+        //Decode and Execute
+        self.execute(op_code);
+    }
+
+    //Fetch
+    pub fn fetch(&mut self) -> u16 {
+        let high_nibble = self.ram[self.pc as usize] as u16;
+        let lower_nibble = self.ram[self.pc as usize] as u16;
+        let op_code = (high_nibble << 8) | lower_nibble;
+
+        self.pc += 2;
+        op_code
+    }
+
+    //Decode and Execute
+    fn execute(&mut self, op_code: u16) {
+        let first_byte  = (op_code & 0xF000) >> 12;
+        let second_byte = (op_code & 0x0F00) >> 8;
+        let third_byte  = (op_code & 0x00F0) >> 4;
+        let fourth_byte = op_code & 0x000F;
+
+        match(first_byte, second_byte, third_byte, fourth_byte) {
+            (_, _, _, _) => unimplemented!("Unimplemented opcode: {}", op_code)
+        }
+    }
+
+    pub fn tick_timers(&mut self) {
+        if self.delay > 0 {
+            self.delay -= 1;
+        }
+
+        if self.sound > 0 {
+            if self.sound == 1 {
+                //Beep
+            }
+
+            self.sound -= 1;
+        }
+    }
+
     fn push(&mut self, val: u16) {
         self.stack[self.sp as usize] = val;
         self.sp += 1;

@@ -102,7 +102,133 @@ impl Rusty {
         let fourth_byte = op_code & 0x000F;
 
         match(first_byte, second_byte, third_byte, fourth_byte) {
-            (_, _, _, _) => unimplemented!("Unimplemented opcode: {}", op_code)
+            (0x0, 0x0, 0x0, 0x0) => return,
+            (0x0, 0xE, 0x0, 0x0) => self.clear_screen(),
+            (0x0, 0x0, 0xE, 0xE) => self.ret_sub(),
+            (0x1,  _ ,  _ ,  _ ) => self.jp_addr(op_code & 0x0FFF),
+            (0x2,  _ ,  _ ,  _ ) => self.call_addr(op_code & 0x0FFF),
+            (0x3,  _ ,  _ ,  _ ) => self.skip_eq(second_byte as usize, (op_code & 0x00FF) as u8),
+            (0x4,  _ ,  _ ,  _ ) => self.skip_neq(second_byte as usize, (op_code & 0x00FF) as u8),
+            (0x5,  _ ,  _ , 0x0) => self.skip_reg_eq(second_byte as usize, third_byte as usize),
+            (0x6,  _ ,  _ ,  _ ) => self.set_reg(second_byte as usize, (op_code & 0x00FF) as u8),
+            (0x7,  _ ,  _ ,  _ ) => self.add_to_reg(second_byte as usize, (op_code & 0x00FF) as u8),
+            (0x8,  _ ,  _ , 0x0) => self.ld_reg_to_reg(second_byte as usize, third_byte as usize),
+            (0x8,  _ ,  _ , 0x1) => self.or_reg(second_byte as usize, third_byte as usize),
+            (0x8,  _ ,  _ , 0x2) => self.and_reg(second_byte as usize, third_byte as usize),
+            (0x8,  _ ,  _ , 0x3) => self.xor_reg(second_byte as usize, third_byte as usize),
+            (0x8,  _ ,  _ , 0x4) => self.add_w_carry(second_byte as usize, third_byte as usize),
+            (0x8,  _ ,  _ , 0x5) => self.sub_w_borrow(second_byte as usize, third_byte as usize),
+            (0x8,  _ ,  _ , 0x6) => self.sr(second_byte as usize),
+            (0x8,  _ ,  _ , 0x7) => self.sub_w_borrow_rev(second_byte as usize, third_byte as usize),
+            (0x8,  _ ,  _ , 0xE) => self.sl(second_byte as usize),
+            (0x9,  _ ,  _ , 0x0) => self.skip_reg_neq(second_byte as usize, third_byte as usize),
+            ( _ ,  _ ,  _ ,  _ ) => unimplemented!("Unimplemented opcode: {}", op_code)
+        }
+    }
+
+    fn clear_screen(&mut self) {
+        self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
+    }
+
+    fn ret_sub(&mut self) {
+        let ret_address = self.pop();
+        self.pc = ret_address;
+    }
+
+    fn jp_addr(&mut self, val: u16) {
+        self.pc = val;
+    }
+
+    fn call_addr(&mut self, val: u16) {
+        self.push(self.pc);
+        self.pc = val;
+    }
+
+    fn skip_eq(&mut self, reg: usize, val: u8) {
+        let reg_val = self.v_regs[reg];
+        if reg_val == val {
+            self.pc += 2;
+        }
+    }
+
+    fn skip_neq(&mut self, reg: usize, val: u8) {
+        let reg_val = self.v_regs[reg];
+        if reg_val != val {
+            self.pc += 2;
+        }
+    }
+
+    fn skip_reg_eq(&mut self, reg_1: usize, reg_2: usize) {
+        if self.v_regs[reg_1] == self.v_regs[reg_2] {
+            self.pc += 2;
+        }
+    }
+
+    fn set_reg(&mut self, reg: usize, val: u8) {
+        self.v_regs[reg] = val;
+    }
+
+    fn add_to_reg(&mut self, reg: usize, val: u8) {
+        self.v_regs[reg] = self.v_regs[reg].wrapping_add(val);
+    }
+
+    fn ld_reg_to_reg(&mut self, reg_1: usize, reg_2: usize) {
+        self.v_regs[reg_1] = self.v_regs[reg_2];
+    }
+
+    fn or_reg(&mut self, reg_1: usize, reg_2: usize) {
+        self.v_regs[reg_1] |= self.v_regs[reg_2];
+    }
+
+    fn and_reg(&mut self, reg_1: usize, reg_2: usize) {
+        self.v_regs[reg_1] &= self.v_regs[reg_2];
+    }
+
+    fn xor_reg(&mut self, reg_1: usize, reg_2: usize) {
+        self.v_regs[reg_1] ^= self.v_regs[reg_2];
+    }
+
+    fn add_w_carry(&mut self, reg_1: usize, reg_2: usize) {
+        let (new_reg_1, carry) = self.v_regs[reg_1].overflowing_add(self.v_regs[reg_2]);
+        let vf = if carry { 1 } else { 0 };
+
+        self.v_regs[reg_1] = new_reg_1;
+        self.v_regs[0xF] = vf;
+    }
+
+    fn sub_w_borrow(&mut self, reg_1: usize, reg_2: usize) { 
+        let (new_reg_1, borrow) = self.v_regs[reg_1].overflowing_sub(self.v_regs[reg_2]);
+        let vf = if borrow { 0 } else { 1 };
+
+        self.v_regs[reg_1] = new_reg_1;
+        self.v_regs[0xF] = vf;
+    }
+
+    fn sr(&mut self, reg: usize) {
+        let lsb = self.v_regs[reg] & 0x1;
+
+        self.v_regs[reg] >>= 1;
+        self.v_regs[0xF] = lsb;
+    }
+
+    fn sub_w_borrow_rev(&mut self, reg_1: usize, reg_2: usize) {
+        let (new_reg_1, borrow) = self.v_regs[reg_2].overflowing_sub(self.v_regs[reg_1]);
+        let vf = if borrow { 0 } else { 1 };
+
+        self.v_regs[reg_1] = new_reg_1;
+        self.v_regs[0xF] = vf;
+    }
+
+    fn sl(&mut self, reg: usize) {
+        let msb = (self.v_regs[reg] & 0x80) >> 7;
+
+        self.v_regs[reg] <<= 1;
+        self.v_regs[0xF] = msb;
+    }
+
+    fn skip_reg_neq(&mut self, reg_1: usize, reg_2: usize) {
+        if self.v_regs[reg_1] != self.v_regs[reg_2] {
+            self.pc += 2;
         }
     }
 

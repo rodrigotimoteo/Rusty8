@@ -1,3 +1,5 @@
+use rand::random;
+
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
 
@@ -76,6 +78,21 @@ impl Rusty {
         self.ram[..FONTSET_SIZE].copy_from_slice(&FONTSET);
     }
 
+    pub fn get_display(&self) -> &[bool] {
+        &self.screen
+    }
+
+    pub fn keypress(&mut self, index: usize, pressed: bool) {
+        self.keys[index] = pressed;
+    }
+
+    pub fn load_rom(&mut self, data: &[u8]) {
+        let start = START_ADDRESS as usize;
+        let end = (START_ADDRESS as usize) + data.len();
+
+        self.ram[start..end].copy_from_slice(data);
+    }
+ 
     //Fetch, decode, execute
     pub fn tick(&mut self) {
         //Fetch
@@ -122,6 +139,21 @@ impl Rusty {
             (0x8,  _ ,  _ , 0x7) => self.sub_w_borrow_rev(second_byte as usize, third_byte as usize),
             (0x8,  _ ,  _ , 0xE) => self.sl(second_byte as usize),
             (0x9,  _ ,  _ , 0x0) => self.skip_reg_neq(second_byte as usize, third_byte as usize),
+            (0xA,  _ ,  _ ,  _ ) => self.ld_i(op_code & 0x0FFF),
+            (0xB,  _ ,  _ ,  _ ) => self.jp(op_code & 0x0FFF),
+            (0xC,  _ ,  _ ,  _ ) => self.rand(second_byte as usize, (op_code & 0x00FF) as u8), 
+            (0xD,  _ ,  _ ,  _ ) => self.draw_sprite(second_byte as usize, third_byte as usize, fourth_byte),
+            (0xE,  _ , 0x9, 0xE) => self.skip_if_press(second_byte as usize),
+            (0xE,  _ , 0xA, 0x1) => self.skip_not_press(second_byte as usize),
+            (0xF,  _ , 0x0, 0x7) => self.store_delay(second_byte as usize),
+            (0xF,  _ , 0x0, 0xA) => self.wait_key(second_byte as usize),
+            (0xF,  _ , 0x1, 0x5) => self.set_delay(second_byte as usize),
+            (0xF,  _ , 0x1, 0x8) => self.set_sound(second_byte as usize),
+            (0xF,  _ , 0x1, 0xE) => self.add_i_reg(second_byte as usize),
+            (0xF,  _ , 0x2, 0x9) => self.set_i_to_x(second_byte as usize),
+            (0xF,  _ , 0x3, 0x3) => self.bcd(second_byte as usize),
+            (0xF,  _ , 0x5, 0x5) => self.store_vreg(second_byte as usize),
+            (0xF,  _ , 0x5, 0x6) => self.load_vreg(second_byte as usize),
             ( _ ,  _ ,  _ ,  _ ) => unimplemented!("Unimplemented opcode: {}", op_code)
         }
     }
@@ -229,6 +261,127 @@ impl Rusty {
     fn skip_reg_neq(&mut self, reg_1: usize, reg_2: usize) {
         if self.v_regs[reg_1] != self.v_regs[reg_2] {
             self.pc += 2;
+        }
+    }
+
+    fn ld_i(&mut self, val: u16) {
+        self.i_reg = val;
+    }
+
+    fn jp(&mut self, val: u16) {
+        self.pc = (self.v_regs[0x0] as u16) + val;
+    }
+
+    fn rand(&mut self, reg: usize, val: u8) {
+        let random_u8: u8 = random();
+
+        self.v_regs[reg] = random_u8 & val;
+    }
+
+    fn draw_sprite(&mut self, reg_1: usize, reg_2: usize, rows: u16) {
+        let x: u16 = self.v_regs[reg_1] as u16;
+        let y = self.v_regs[reg_2] as u16;
+
+        let mut pixel_flipped = false;
+
+        for y_line in 0..rows {
+            let address = self.i_reg + y_line as u16;
+            let pixels  = self.ram[address as usize];
+
+            for x_line in 0..8 {
+                if (pixels & (0b1000_0000 >> x_line)) != 0 {
+                    let pixel_x = (x + x_line as u16) as usize % SCREEN_WIDTH;
+                    let pixel_y = (y + y_line as u16) as usize % SCREEN_HEIGHT;
+
+                    let index = pixel_x + SCREEN_WIDTH * pixel_y;
+
+                    pixel_flipped |= self.screen[index];
+                    self.screen[index] ^= true;
+                }
+            }
+        }
+
+        if pixel_flipped {
+            self.v_regs[0xF] = 1;
+        } else {
+            self.v_regs[0xF] = 0;
+        }
+    }
+
+    fn skip_if_press(&mut self, reg: usize) {
+        let key = self.keys[self.v_regs[reg] as usize];
+
+        if key {
+            self.pc += 2;
+        }
+    }
+
+    fn skip_not_press(&mut self, reg: usize) { 
+        let key = self.keys[self.v_regs[reg] as usize];
+
+        if !key {
+            self.pc += 2;
+        }
+    }
+
+    fn store_delay(&mut self, reg: usize) {
+        self.v_regs[reg] = self.delay;
+    }
+
+    fn wait_key(&mut self, reg: usize) {
+        let mut pressed = false;
+        for i in 0..self.keys.len() {
+            if self.keys[i] {
+                self.v_regs[reg] = i as u8;
+                pressed = true;
+                break;
+            }
+        }
+
+        if !pressed {
+            self.pc -= 2;
+        }
+    }
+
+    fn set_delay(&mut self, reg: usize) {
+        self.delay = self.v_regs[reg];
+    }
+
+    fn set_sound(&mut self, reg: usize) {
+        self.sound = self.v_regs[reg];
+    }
+
+    fn add_i_reg(&mut self, reg: usize) {
+        self.i_reg = self.i_reg.wrapping_add(self.v_regs[reg] as u16);
+    }
+
+    fn set_i_to_x(&mut self, reg: usize) {
+        let reg_value = self.v_regs[reg] as u16;
+
+        self.i_reg = reg_value * 5;
+    }
+
+    fn bcd(&mut self, reg: usize) {
+        let reg_value = self.v_regs[reg] as f32;
+
+        let hundreds = (reg_value / 100.0).floor() as u8;
+        let tens = ((reg_value / 10.0) % 10.0).floor() as u8;
+        let ones = (reg_value % 10.0) as u8;
+
+        self.ram[self.i_reg as usize] = hundreds;
+        self.ram[(self.i_reg + 1) as usize] = tens;
+        self.ram[(self.i_reg + 2) as usize] = ones;
+    }   
+
+    fn store_vreg(&mut self, reg: usize) {
+        for index in 0..reg {
+            self.ram[self.i_reg as usize + index] = self.v_regs[index];
+        }
+    }
+
+    fn load_vreg(&mut self, reg: usize) {
+        for index in 0..reg {
+            self.v_regs[index] = self.ram[self.i_reg as usize + index];
         }
     }
 

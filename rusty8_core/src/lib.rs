@@ -104,7 +104,7 @@ impl Rusty {
     //Fetch
     pub fn fetch(&mut self) -> u16 {
         let high_nibble = self.ram[self.pc as usize] as u16;
-        let lower_nibble = self.ram[self.pc as usize] as u16;
+        let lower_nibble = self.ram[(self.pc + 1) as usize] as u16;
         let op_code = (high_nibble << 8) | lower_nibble;
 
         self.pc += 2;
@@ -120,7 +120,7 @@ impl Rusty {
 
         match(first_byte, second_byte, third_byte, fourth_byte) {
             (0x0, 0x0, 0x0, 0x0) => return,
-            (0x0, 0xE, 0x0, 0x0) => self.clear_screen(),
+            (0x0, 0x0, 0xE, 0x0) => self.clear_screen(),
             (0x0, 0x0, 0xE, 0xE) => self.ret_sub(),
             (0x1,  _ ,  _ ,  _ ) => self.jp_addr(op_code & 0x0FFF),
             (0x2,  _ ,  _ ,  _ ) => self.call_addr(op_code & 0x0FFF),
@@ -153,7 +153,7 @@ impl Rusty {
             (0xF,  _ , 0x2, 0x9) => self.set_i_to_x(second_byte as usize),
             (0xF,  _ , 0x3, 0x3) => self.bcd(second_byte as usize),
             (0xF,  _ , 0x5, 0x5) => self.store_vreg(second_byte as usize),
-            (0xF,  _ , 0x5, 0x6) => self.load_vreg(second_byte as usize),
+            (0xF,  _ , 0x6, 0x5) => self.load_vreg(second_byte as usize),
             ( _ ,  _ ,  _ ,  _ ) => unimplemented!("Unimplemented opcode: {}", op_code)
         }
     }

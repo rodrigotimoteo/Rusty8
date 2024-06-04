@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 rusty8_core = { path = "../rusty8_core" }
+sdl2 = "^0.34.3"
